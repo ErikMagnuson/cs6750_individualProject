@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AR Text Prediction Prototype (Flask)</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Use Inter font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #111827;
+            /* gray-900 */
+            color: #F9FAFB;
+            /* gray-50 */
+        }
+
+        /* Main text display styling */
+        .text-display {
+            font-size: 1.75rem;
+            /* text-4xl */
+            /* line-height: 2.5rem; */
+            font-weight: 500;
+            /* medium */
+            min-height: 150px;
+            /* Give it space, but remove left padding to prevent indent */
+            padding: 1rem 1rem 1rem 1rem;
+            justify-content: flex-start;
+            /* Align items to the start (left) */
+            border-radius: 0.5rem;
+            /* rounded-lg */
+            background-color: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            caret-color: #3B82F6;
+            /* blue-500 */
+        }
+
+        /* Styling for the inline (ghost) suggestion */
+        .suggestion-inline {
+            color: #4B5563;
+            /* gray-600 */
+        }
+
+        /* Styling for the primary suggested word in the full phrase */
+        .suggestion-primary-word {
+            color: #9CA3AF;
+            /* gray-400 */
+            font-weight: 700;
+            /* bold */
+            background-color: rgba(59, 130, 246, 0.1);
+            /* blue-500 with alpha */
+        }
+
+        /* Styling for the full phrase suggestion */
+        .suggestion-phrase {
+            font-size: 1.75rem;
+            /* text-4xl, same as text-display */
+            line-height: 2.5rem;
+            color: #6B7280;
+            /* gray-500 */
+            text-align: center;
+            min-height: 2.5rem;
+            padding: 0.25rem;
+        }
+
+        /* Styling for the alternate, side suggestions */
+        .suggestion-alternate-word {
+            font-size: 1.75rem;
+            /* text-4xl, same as text-display */
+            line-height: 2rem;
+            color: #4B5563;
+            /* gray-600 */
+            transition: all 0.2s ease-in-out, transform 0.2s ease-in-out;
+            text-align: left;
+            min-width: 80px;
+            margin-top: .5rem;
+        }
+
+        /* Style for the instruction box */
+        .controls {
+            background-color: #1F2937;
+            /* gray-800 */
+            border: 1px solid #374151;
+            /* gray-700 */
+            border-radius: 0.5rem;
+            /* rounded-lg */
+            padding: 1rem;
+        }
+
+        .controls kbd {
+            background-color: #374151;
+            /* gray-700 */
+            border: 1px solid #4B5563;
+            /* gray-600 */
+            padding: 0.1rem 0.5rem;
+            border-radius: 0.25rem;
+            font-weight: 600;
+        }
+    </style>
+</head>
+
+<body class="flex items-center justify-center min-h-screen p-4">
+
+    <div class="w-full max-w-4xl space-y-6">
+        <h1 class="text-3xl font-bold text-center text-blue-400">CS6750 Final Prototype</h1>
+
+        <!-- Main UI Component -->
+        <div class="w-full max-w-3xl mx-auto space-y-4">
+
+            <!-- Main Text and Suggestion Display -->
+            <div id="text-display" class="text-display" tabindex="0">
+                <span id="typed-text"></span><span id="cursor"
+                    class="inline-block w-0.5 h-9 bg-blue-500 animate-pulse"></span>
+                <!-- Container for all suggestions to position them together -->
+                <div class="inline-block relative align-top">
+                    <span id="suggestion-primary-word" class="suggestion-primary-word"></span>
+                    <span id="suggestion-rest-of-phrase" class="suggestion-inline"></span>
+                    <!-- Position alternates below the primary word -->
+                    <div class="absolute left-0 top-full flex flex-col items-start">
+                        <span id="suggestion-alternate-1" class="suggestion-alternate-word"></span>
+                        <span id="suggestion-alternate-2" class="suggestion-alternate-word"></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Loading Indicator -->
+            <div id="loading-indicator" class="text-center text-gray-500 text-lg h-6"></div>
+        </div>
+
+        <!-- Instructions Panel -->
+        <div class="w-full max-w-md mx-auto controls">
+            <h2 class="text-lg font-semibold mb-3 text-center">Controls (Gesture Simulation)</h2>
+            <ul class="space-y-2">
+                <li class="flex items-center justify-between">
+                    <span>Type any letter:</span>
+                    <kbd>A-Z</kbd>, <kbd>Space</kbd>
+                </li>
+                <li class="flex items-center justify-between">
+                    <span>Delete text:</span>
+                    <kbd>Backspace</kbd>
+                </li>
+                <li class="flex items-center justify-between">
+                    <span>Change suggestion:</span>
+                    <kbd>&uarr;</kbd> / <kbd>&darr;</kbd>
+                </li>
+                <li class="flex items-center justify-between">
+                    <span>Auto-fill word:</span>
+                    <kbd>&rarr;</kbd> or <kbd>Tab</kbd>
+                </li>
+                <li class="flex items-center justify-between">
+                    <span>Auto-fill phrase:</span>
+                    <kbd>Enter</kbd>
+                </li>
+                <li class="pt-2">
+                    <button id="clear-button"
+                        class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded transition-colors duration-150">
+                        Clear Text
+                    </button>
+                </li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        // --- Application State ---
+        let state = {
+            typedText: "",
+            suggestions: [], // Array of { word: "...", phrase: "..." }
+            selectedIndex: 0,
+            isLoading: false
+        };
+        let apiCallTimer = null; // Timer for debouncing API calls
+        const DEBOUNCE_DELAY = 500; // 500ms pause before fetching
+
+        // --- DOM Elements ---
+        const typedTextEl = document.getElementById('typed-text');
+        const suggestionPrimaryWordEl = document.getElementById('suggestion-primary-word');
+        const suggestionRestOfPhraseEl = document.getElementById('suggestion-rest-of-phrase');
+        const suggestionAlternate1El = document.getElementById('suggestion-alternate-1');
+        const suggestionAlternate2El = document.getElementById('suggestion-alternate-2');
+
+        const textDisplayEl = document.getElementById('text-display');
+        const loadingIndicatorEl = document.getElementById('loading-indicator');
+        const clearButtonEl = document.getElementById('clear-button');
+
+        // --- Event Listeners ---
+        document.addEventListener('keydown', handleKeyPress);
+        clearButtonEl.addEventListener('click', handleClear);
+        textDisplayEl.addEventListener('focus', () => {
+            document.getElementById('cursor').classList.remove('hidden');
+        });
+        textDisplayEl.addEventListener('blur', () => {
+            document.getElementById('cursor').classList.add('hidden');
+        });
+
+        // --- Initial Load ---
+        (async () => {
+            textDisplayEl.focus(); // Focus on load, but don't fetch suggestions.
+            render(); // Initial render.
+        })();
+
+        // --- Core Functions ---
+
+        /**
+         * Handles all key presses for the application
+         */
+        async function handleKeyPress(e) {
+            if (["Tab", "ArrowUp", "ArrowDown", "ArrowRight", "Enter", "Backspace", "Space"].includes(e.key)) {
+                e.preventDefault();
+            }
+
+            if (e.key === 'ArrowUp') {
+                if (state.suggestions.length === 0) return;
+                state.selectedIndex = (state.selectedIndex - 1 + state.suggestions.length) % state.suggestions.length;
+                render();
+                return;
+            }
+            if (e.key === 'ArrowDown') {
+                if (state.suggestions.length === 0) return;
+                state.selectedIndex = (state.selectedIndex + 1) % state.suggestions.length;
+                render();
+                return;
+            }
+
+            if (state.isLoading) {
+                return;
+            }
+
+            if (e.key === 'Enter') {
+                clearTimeout(apiCallTimer);
+                const currentSuggestion = state.suggestions[state.selectedIndex];
+                if (currentSuggestion) {
+                    // --- ADDED ---
+                    // Log the "accept phrase" event
+                    logEvent('accept_phrase', {
+                        typedText: state.typedText,
+                        suggestion: currentSuggestion
+                    });
+                    // --- END ADDED ---
+
+                    state.typedText += currentSuggestion.word + " " + currentSuggestion.phrase + " ";
+                    await getSuggestions(); // Call IMMEDIATELY
+                }
+            } else if (e.key === 'Tab' || e.key === 'ArrowRight') {
+                clearTimeout(apiCallTimer);
+                const currentSuggestion = state.suggestions[state.selectedIndex];
+                if (currentSuggestion) {
+                    // --- ADDED ---
+                    // Log the "accept word" event
+                    logEvent('accept_word', {
+                        typedText: state.typedText,
+                        suggestion: currentSuggestion
+                    });
+                    // --- END ADDED ---
+
+                    state.typedText += currentSuggestion.word + " ";
+                    await getSuggestions(); // Call IMMEDIATELY
+                }
+            } else if (e.key === ' ') {
+                state.typedText += " ";
+                triggerDebouncedSuggestions(); // Call DEBOUNCED
+            } else if (e.key === 'Backspace') {
+                if (state.typedText.length > 0) {
+                    const lastCharWasSpace = state.typedText.endsWith(" ");
+                    state.typedText = state.typedText.slice(0, -1);
+                    if (lastCharWasSpace || state.typedText.length === 0 || state.typedText.endsWith(" ")) {
+                        triggerDebouncedSuggestions(); // Call DEBOUNCED
+                    } else {
+                        clearTimeout(apiCallTimer);
+                        clearSuggestions();
+                    }
+                }
+            }
+            else if (e.key.length === 1 && e.key.match(/[a-z0-9,'".?!]/i)) {
+                state.typedText += e.key;
+                clearTimeout(apiCallTimer);
+                clearSuggestions();
+            }
+
+            render();
+        }
+
+        /**
+         * Clears the text and resets the state
+         */
+        async function handleClear() {
+            clearTimeout(apiCallTimer);
+            state.typedText = "";
+            state.selectedIndex = 0;
+            state.suggestions = [];
+            textDisplayEl.focus();
+            // Don't fetch suggestions on clear, wait for new input.
+            render();
+        }
+
+        /**
+         * Triggers a debounced call to the getSuggestions API
+         */
+        function triggerDebouncedSuggestions() {
+            clearTimeout(apiCallTimer);
+            clearSuggestions();
+            render();
+            apiCallTimer = setTimeout(async () => {
+                await getSuggestions();
+            }, DEBOUNCE_DELAY);
+        }
+
+        /**
+         * NEW: Fetches suggestions from our Flask backend
+         */
+        async function getSuggestions() {
+            if (state.isLoading) return;
+
+            state.isLoading = true;
+            showLoading("Loading suggestions...");
+            clearSuggestions();
+            render();
+
+            try {
+                // Call our own Flask server endpoint
+                const response = await fetch('/get_suggestions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ typedText: state.typedText })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Server error: ${response.status}`);
+                }
+
+                const suggestions = await response.json();
+
+                if (suggestions && suggestions.length > 0) {
+                    state.suggestions = suggestions;
+                    state.selectedIndex = 0;
+                } else {
+                    state.suggestions = [];
+                }
+
+            } catch (error) {
+                console.error("Error getting suggestions:", error);
+                showLoading("Error. Try again.");
+                state.suggestions = [];
+            } finally {
+                state.isLoading = false;
+                if (!loadingIndicatorEl.textContent.startsWith("Error")) {
+                    hideLoading();
+                }
+                render();
+            }
+        }
+
+        // --- ADDED ---
+        /**
+         * Asynchronously logs an event to the backend.
+         * Does not block execution and silently catches errors.
+         */
+        function logEvent(eventType, eventData) {
+            console.log("Logging event:", eventType, eventData); // For client-side debugging
+            fetch('/log_event', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    type: eventType,
+                    data: eventData,
+                    timestamp: new Date().toISOString()
+                })
+            }).catch(error => {
+                // Silently log client-side error, don't disrupt user
+                console.error('Error logging event:', error);
+            });
+        }
+        // --- END ADDED ---
+
+        /**
+         * Clears all suggestion-related DOM elements and state
+         */
+        function clearSuggestions() {
+            state.suggestions = [];
+            state.selectedIndex = 0;
+            // Don't call render() here, let the calling function do it.
+        }
+
+        /**
+         * Renders the current state to the DOM
+         */
+        function render() {
+            typedTextEl.textContent = state.typedText;
+            const currentSuggestion = state.suggestions[state.selectedIndex];
+
+            if (currentSuggestion && state.suggestions.length > 0) {
+                const alt1Index = (state.selectedIndex + 1) % state.suggestions.length;
+                const alt2Index = (state.selectedIndex + 2) % state.suggestions.length;
+
+                // Display the primary word and the rest of the phrase
+                suggestionPrimaryWordEl.textContent = " " + currentSuggestion.word;
+                suggestionRestOfPhraseEl.textContent = " " + currentSuggestion.phrase;
+
+                if (state.suggestions.length > 1) {
+                    suggestionAlternate1El.textContent = state.suggestions[alt1Index].word;
+                } else {
+                    suggestionAlternate1El.textContent = "";
+                }
+
+                if (state.suggestions.length > 2) {
+                    suggestionAlternate2El.textContent = state.suggestions[alt2Index].word;
+                } else {
+                    suggestionAlternate2El.textContent = "";
+                }
+            } else {
+                suggestionPrimaryWordEl.textContent = "";
+                suggestionRestOfPhraseEl.textContent = "";
+                suggestionAlternate1El.textContent = "";
+                suggestionAlternate2El.textContent = "";
+            }
+        }
+
+        function showLoading(message) {
+            loadingIndicatorEl.textContent = message;
+        }
+
+        function hideLoading() {
+            loadingIndicatorEl.textContent = "";
+        }
+
+        function animateSuggestions() {
+            if (suggestionsContainerEl) {
+                suggestionsContainerEl.style.transform = 'scale(1.02)';
+                suggestionsContainerEl.style.transition = 'transform 0.1s ease-out';
+                setTimeout(() => {
+                    suggestionsContainerEl.style.transform = 'scale(1)';
+                }, 100);
+            }
+        }
+    </script>
+</body>
+
+</html>
