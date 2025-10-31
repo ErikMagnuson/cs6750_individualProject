@@ -1,3 +1,5 @@
+## Disclaimer - This project was heavily vibe coded
+
 # Gemini Predictive Text Web App
 
 This is a simple web application built with Flask and Python that uses the Google Gemini API to provide real-time predictive text suggestions. As a user types into a text area, the application suggests the most likely next words and completes phrases for them.
